@@ -19,23 +19,23 @@
 
 ## Phase 2: Detection Engine
 
-- [ ] **Deep linguistic analysis** (beyond simple heuristics)
-  - [ ] Perplexity estimation — measure how predictable the text is using n-gram language models; AI text has abnormally low perplexity
-  - [ ] N-gram frequency analysis — compare bigram/trigram distributions against human baselines; AI has smoother, more uniform distributions
-  - [ ] Coherence scoring — measure inter-sentence semantic similarity; AI text is unnaturally cohesive (every sentence tightly connects)
-  - [ ] Readability metrics — Flesch-Kincaid, Coleman-Liau, ARI; AI clusters at specific grade levels (~10-13)
-  - [ ] Repetition patterns — detect repeated syntactic structures, phrase templates, and dependency tree shapes
-  - [ ] Entropy analysis — character/word-level entropy; AI text has lower information entropy
-- [ ] Refine heuristic scorers (tune weights against known AI/human samples)
+- [x] **Deep linguistic analysis** (beyond simple heuristics)
+  - [x] Perplexity estimation — self-surprise via bigram model (linguistic.py)
+  - [x] N-gram frequency analysis — bigram distribution entropy (linguistic.py)
+  - [x] Coherence scoring — inter-sentence Jaccard overlap (linguistic.py)
+  - [x] Readability metrics — Flesch-Kincaid grade + per-paragraph consistency (linguistic.py)
+  - [x] Repetition patterns — sentence opener + length-bucket template reuse (linguistic.py)
+  - [x] Entropy analysis — word-level + character-level information entropy (linguistic.py)
+- [ ] Refine scorers (tune weights against known AI/human research paper samples)
 - [x] LLM-as-judge detector (calibrated prompt, 0-100 score + reasoning via kimi)
 - [x] Segment-level analysis (~150-word chunks preserving sentence boundaries)
-- [x] Ensemble scorer (weighted: 0.35 LLM judge + heuristics, with fallback)
+- [x] Ensemble scorer (weighted: 0.25 LLM judge + 0.43 linguistic + 0.32 heuristic, with fallback)
 
 ## Phase 3: Document Pipeline
 
 - [x] PDF text extraction (PyPDF2)
 - [x] DOCX text extraction (python-docx)
-- [ ] **LaTeX (.tex) text extraction** — strip commands, preserve section structure, handle math environments
+- [x] **LaTeX (.tex) text extraction** — strip commands, preserve section structure, handle math environments (parser.py)
 - [x] Document structure model (sections → paragraphs → sentences hierarchy)
 - [x] Annotated PDF report generation (color-coded highlights, per-paragraph scores, summary page)
 - [ ] Clean rewritten PDF output (rewritten text in original formatting)
