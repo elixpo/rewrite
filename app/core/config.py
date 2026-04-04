@@ -35,40 +35,44 @@ SCORE_YELLOW = 60
 SCORE_RED = 60  # above this = red
 
 # --- Ensemble weights (full: LLM judge + linguistic + heuristic) ---
+# Calibrated against 10 arXiv human papers vs kimi AI equivalents.
+# Only features with positive Cohen's d (AI scores higher than human) get weight.
 ENSEMBLE_WEIGHTS = {
     "llm_judge": 0.25,
-    # Deep linguistic features
-    "perplexity": 0.15,
-    "coherence": 0.10,
-    "n_gram_uniformity": 0.08,
-    "readability": 0.05,
-    "entropy": 0.05,
-    "repetition": 0.04,
-    # Classic heuristics
-    "burstiness": 0.10,
-    "vocabulary_markers": 0.07,
-    "type_token_ratio": 0.04,
-    "sentence_starters": 0.03,
-    "paragraph_structure": 0.02,
-    "punctuation_diversity": 0.02,
+    # High separation (Cohen's d > 1.0)
+    "burstiness": 0.20,       # d=2.01 — strongest signal
+    "vocabulary_markers": 0.18, # d=1.81
+    "paragraph_structure": 0.12, # d=1.15
+    "n_gram_uniformity": 0.10, # d=1.03
+    # Moderate separation (Cohen's d 0.5-1.0)
+    "repetition": 0.10,       # d=0.95
+    # Weak separation (Cohen's d < 0.5)
+    "punctuation_diversity": 0.05, # d=0.46
+    # Zero weight — inverted or no separation on research papers
+    "perplexity": 0.0,
+    "coherence": 0.0,
+    "readability": 0.0,
+    "entropy": 0.0,
+    "type_token_ratio": 0.0,
+    "sentence_starters": 0.0,
 }
 
-# --- Fallback weights (no LLM judge — linguistic + heuristic only) ---
+# --- Fallback weights (no LLM judge) ---
+# Calibrated: redistribute LLM judge weight proportionally.
 HEURISTIC_WEIGHTS = {
-    # Deep linguistic features
-    "perplexity": 0.20,
-    "coherence": 0.14,
-    "n_gram_uniformity": 0.10,
-    "readability": 0.06,
-    "entropy": 0.06,
-    "repetition": 0.05,
-    # Classic heuristics
-    "burstiness": 0.14,
-    "vocabulary_markers": 0.10,
-    "type_token_ratio": 0.05,
-    "sentence_starters": 0.04,
-    "paragraph_structure": 0.03,
-    "punctuation_diversity": 0.03,
+    "burstiness": 0.27,
+    "vocabulary_markers": 0.24,
+    "paragraph_structure": 0.155,
+    "n_gram_uniformity": 0.14,
+    "repetition": 0.13,
+    "punctuation_diversity": 0.065,
+    # Zero-weighted (inverted on research papers)
+    "perplexity": 0.0,
+    "coherence": 0.0,
+    "readability": 0.0,
+    "entropy": 0.0,
+    "type_token_ratio": 0.0,
+    "sentence_starters": 0.0,
 }
 
 # --- Paraphrase ---

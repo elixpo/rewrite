@@ -26,7 +26,7 @@
   - [x] Readability metrics — Flesch-Kincaid grade + per-paragraph consistency (linguistic.py)
   - [x] Repetition patterns — sentence opener + length-bucket template reuse (linguistic.py)
   - [x] Entropy analysis — word-level + character-level information entropy (linguistic.py)
-- [ ] Refine scorers (tune weights against known AI/human research paper samples)
+- [x] Refine scorers — calibrated against 10 arXiv papers + kimi AI equivalents (calibrate/)
 - [x] LLM-as-judge detector (calibrated prompt, 0-100 score + reasoning via kimi)
 - [x] Segment-level analysis (~150-word chunks preserving sentence boundaries)
 - [x] Ensemble scorer (weighted: 0.25 LLM judge + 0.43 linguistic + 0.32 heuristic, with fallback)
