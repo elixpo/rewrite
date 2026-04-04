@@ -281,13 +281,14 @@ def _generate_report(text, output_path, use_llm=True, model=None, file_path=None
 def cmd_process(args):
     """Full pipeline: detect → paraphrase per section → re-score → output to out/ folder."""
     from app.document.parser import parse_file
-    from app.document.structure import Document
+    from app.document.structure import Document, Section, Paragraph
     from app.document.report import generate_report
     from app.document.tex_writer import rewrite_tex
     from app.paraphrase.prompts import build_messages
-    from app.paraphrase.postprocess import postprocess
+    from app.paraphrase.postprocess import postprocess, global_postprocess
     from app.core.llm import chat
     import os
+    import copy
 
     file_path = getattr(args, "file", None)
     text = read_input(args.text, file_path)
@@ -461,11 +462,19 @@ def cmd_process(args):
         print()
 
     # =====================================================================
+    # GLOBAL POST-PROCESSING
+    # =====================================================================
+    print(f"\n  {c('Running global post-processing...', 'dim')}", end=" ", flush=True)
+    original_para_texts = [p.text for p in paragraphs]
+    rewritten_paragraphs = global_postprocess(rewritten_paragraphs, original_para_texts)
+    print(c("Done", "green"))
+
+    # =====================================================================
     # PHASE 3: OUTPUT
     # =====================================================================
     print_header("PHASE 3: OUTPUT")
 
-    # Reassemble and score
+    # Reassemble and score the FULL document (cross-document scoring)
     final_text = "\n\n".join(rewritten_paragraphs)
     overall_after = detect_heuristic_only(final_text)
 
@@ -506,7 +515,6 @@ def cmd_process(args):
         with open(file_path, "r", encoding="utf-8") as f:
             original_tex = f.read()
 
-        original_para_texts = [p.text for p in paragraphs]
         rewritten_tex = rewrite_tex(original_tex, original_para_texts, rewritten_paragraphs)
 
         tex_out = os.path.join(out_dir, f"{base_name}_rewritten.tex")
@@ -514,13 +522,12 @@ def cmd_process(args):
             f.write(rewritten_tex)
         print(f"  {c('Rewritten .tex  ->  ' + tex_out, 'green')}")
     else:
-        # Plain text output
         txt_out = os.path.join(out_dir, f"{base_name}_rewritten.txt")
         with open(txt_out, "w", encoding="utf-8") as f:
             f.write(final_text)
         print(f"  {c('Rewritten text  ->  ' + txt_out, 'green')}")
 
-    # 2. Rewritten report PDF
+    # 2. Rewritten report PDF — preserve original document structure
     rewritten_report = os.path.join(out_dir, f"{base_name}_rewritten_report.pdf")
     rewritten_seg_scores = []
     for i, para_text in enumerate(rewritten_paragraphs):
@@ -530,7 +537,15 @@ def cmd_process(args):
             r = detect_heuristic_only(para_text)
             rewritten_seg_scores.append({"score": r["score"], "verdict": r["verdict"], "text": para_text})
 
-    rewritten_doc = Document.from_text(final_text, title=doc.title + " (Rewritten)" if doc.title else "Rewritten")
+    # Build rewritten doc preserving section structure from original
+    rewritten_doc = copy.deepcopy(doc)
+    rewritten_doc.title = (doc.title + " (Rewritten)") if doc.title else "Rewritten"
+    para_idx = 0
+    for section in rewritten_doc.sections:
+        for j, para in enumerate(section.paragraphs):
+            if para_idx < len(rewritten_paragraphs):
+                section.paragraphs[j] = Paragraph(text=rewritten_paragraphs[para_idx])
+            para_idx += 1
     generate_report(
         document=rewritten_doc,
         segment_scores=rewritten_seg_scores,

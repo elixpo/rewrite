@@ -1,7 +1,8 @@
-"""Post-processing pipeline — marker removal, burstiness injection, starter dedup."""
+"""Post-processing pipeline — marker removal, global coherence, length normalization."""
 
 import re
 import random
+import math
 
 import nltk
 
@@ -12,7 +13,7 @@ except LookupError:
 
 from nltk.tokenize import sent_tokenize
 
-# Expanded marker word substitutions
+# --- Marker word substitutions (catch stragglers the LLM missed) ---
 MARKER_REPLACEMENTS = {
     "delve": "explore",
     "crucial": "key",
@@ -52,17 +53,16 @@ MARKER_REPLACEMENTS = {
     "cutting-edge": "latest",
 }
 
-# Phrases to strip or replace
 PHRASE_REPLACEMENTS = {
     "it is important to note": "note that",
     "it is worth noting": "worth noting:",
     "in today's world": "today",
     "in the realm of": "in",
-    "plays a crucial role": "matters a lot",
+    "plays a crucial role": "matters significantly",
     "a myriad of": "many",
     "shed light on": "clarify",
     "in light of": "given",
-    "a testament to": "proof of",
+    "a testament to": "evidence of",
     "serves as a": "is a",
     "it should be noted": "note that",
     "this is particularly": "this is especially",
@@ -70,10 +70,9 @@ PHRASE_REPLACEMENTS = {
 
 
 def replace_markers(text: str) -> str:
-    """Replace AI marker words with human alternatives."""
+    """Replace AI marker words with alternatives."""
     result = text
 
-    # Replace phrases first (longer matches)
     for old, new in PHRASE_REPLACEMENTS.items():
         pattern = re.compile(re.escape(old), re.IGNORECASE)
         result = pattern.sub(
@@ -81,7 +80,6 @@ def replace_markers(text: str) -> str:
             result,
         )
 
-    # Replace single words
     for old, new in MARKER_REPLACEMENTS.items():
         def _replace(match, replacement=new):
             word = match.group(0)
@@ -93,108 +91,159 @@ def replace_markers(text: str) -> str:
     return result
 
 
-def inject_burstiness(text: str, target_cv: float = 0.5) -> str:
-    """Adjust sentence lengths to increase burstiness if too uniform.
+def normalize_length(rewritten: str, original: str, tolerance: float = 0.25) -> str:
+    """Trim rewritten text if it's significantly longer than the original.
 
-    Splits long uniform sequences and occasionally merges short sentences.
+    LLMs tend to expand text when rewriting. This caps the output to within
+    tolerance of the original word count.
     """
-    sentences = sent_tokenize(text)
-    if len(sentences) < 4:
-        return text
+    orig_words = len(original.split())
+    rewritten_words = len(rewritten.split())
 
-    lengths = [len(s.split()) for s in sentences]
-    mean_len = sum(lengths) / len(lengths)
-    if mean_len == 0:
-        return text
+    if orig_words == 0:
+        return rewritten
 
-    import math
-    variance = sum((l - mean_len) ** 2 for l in lengths) / len(lengths)
-    cv = math.sqrt(variance) / mean_len
+    ratio = rewritten_words / orig_words
+    if ratio <= 1.0 + tolerance:
+        return rewritten  # within bounds
 
-    if cv >= target_cv:
-        return text  # already bursty enough
-
+    # Trim from the end, preserving complete sentences
+    target = int(orig_words * (1.0 + tolerance))
+    sentences = sent_tokenize(rewritten)
     result = []
-    i = 0
-    while i < len(sentences):
-        s = sentences[i]
-        words = s.split()
+    word_count = 0
 
-        # Split long sentences (>25 words) at natural breakpoints
-        if len(words) > 25 and random.random() < 0.4:
-            mid = len(words) // 2
-            # Find a comma or conjunction near the middle
-            split_at = mid
-            for j in range(max(mid - 5, 0), min(mid + 5, len(words))):
-                if words[j].rstrip(",") in ("and", "but", "or", "which", "where", "while"):
-                    split_at = j
-                    break
-                if words[j].endswith(","):
-                    split_at = j + 1
-                    break
-
-            part1 = " ".join(words[:split_at]).rstrip(",")
-            part2 = " ".join(words[split_at:])
-            if part2 and not part2[0].isupper():
-                part2 = part2[0].upper() + part2[1:]
-            result.append(part1 + ".")
-            result.append(part2)
-        # Merge short consecutive sentences (<8 words each)
-        elif (
-            len(words) < 8
-            and i + 1 < len(sentences)
-            and len(sentences[i + 1].split()) < 8
-            and random.random() < 0.3
-        ):
-            merged = s.rstrip(".!?") + " — " + sentences[i + 1]
-            result.append(merged)
-            i += 1
-        else:
-            result.append(s)
-        i += 1
-
-    return " ".join(result)
-
-
-def deduplicate_starters(text: str) -> str:
-    """Vary sentence starters if consecutive sentences begin with the same word."""
-    sentences = sent_tokenize(text)
-    if len(sentences) < 2:
-        return text
-
-    alternatives = {
-        "the": ["This", "That", "A", "One"],
-        "this": ["The", "That", "Such a", "One"],
-        "it": ["That", "The result", "What we see"],
-        "there": ["We find", "One sees", "What exists"],
-        "however": ["Still,", "Yet,", "But", "That said,"],
-        "additionally": ["Also,", "On top of that,", "Plus,", "Beyond that,"],
-        "furthermore": ["Also,", "And", "Plus,", "What's more,"],
-        "moreover": ["Also,", "And", "On top of that,", "Plus,"],
-    }
-
-    result = [sentences[0]]
-    for i in range(1, len(sentences)):
-        current_start = sentences[i].strip().split()[0].lower() if sentences[i].strip() else ""
-        prev_start = result[-1].strip().split()[0].lower() if result[-1].strip() else ""
-
-        if current_start == prev_start and current_start in alternatives:
-            alt = random.choice(alternatives[current_start])
-            words = sentences[i].strip().split()
-            words[0] = alt
-            # Fix capitalization of second word if needed
-            if len(words) > 1 and words[1][0].isupper() and current_start in ("however", "additionally", "furthermore", "moreover"):
-                words[1] = words[1][0].lower() + words[1][1:]
-            result.append(" ".join(words))
-        else:
-            result.append(sentences[i])
+    for sent in sentences:
+        sent_words = len(sent.split())
+        if word_count + sent_words > target and result:
+            break
+        result.append(sent)
+        word_count += sent_words
 
     return " ".join(result)
 
 
 def postprocess(text: str) -> str:
-    """Full post-processing pipeline."""
+    """Per-paragraph post-processing: marker removal + length check."""
     text = replace_markers(text)
-    text = inject_burstiness(text)
-    text = deduplicate_starters(text)
     return text
+
+
+# =========================================================================
+# GLOBAL POST-PROCESSING — runs on the full reassembled document
+# =========================================================================
+
+def global_postprocess(paragraphs: list[str], original_paragraphs: list[str]) -> list[str]:
+    """Post-process the full document after all paragraphs have been rewritten.
+
+    Fixes cross-paragraph issues:
+    1. Repeated sentence starters across the document
+    2. Paragraph length normalization (match original lengths)
+    3. Repeated transitional phrases
+    """
+    result = list(paragraphs)
+
+    # 1. Fix repeated starters across consecutive paragraphs
+    result = _fix_cross_paragraph_starters(result)
+
+    # 2. Normalize paragraph lengths against originals
+    for i in range(len(result)):
+        if i < len(original_paragraphs):
+            result[i] = normalize_length(result[i], original_paragraphs[i])
+
+    # 3. Fix repeated transitional patterns across the document
+    result = _fix_repeated_transitions(result)
+
+    return result
+
+
+def _fix_cross_paragraph_starters(paragraphs: list[str]) -> list[str]:
+    """Ensure no two consecutive paragraphs start with the same word/pattern."""
+    result = list(paragraphs)
+
+    for i in range(1, len(result)):
+        prev_start = _get_opener(result[i - 1])
+        curr_start = _get_opener(result[i])
+
+        if prev_start and curr_start and prev_start == curr_start:
+            result[i] = _rewrite_opener(result[i])
+
+    return result
+
+
+def _get_opener(text: str) -> str:
+    """Get the first word of a paragraph, lowercased."""
+    words = text.strip().split()
+    return words[0].lower().rstrip(".,;:") if words else ""
+
+
+def _rewrite_opener(text: str) -> str:
+    """Change the opening of a paragraph to avoid repetition."""
+    sentences = sent_tokenize(text)
+    if not sentences:
+        return text
+
+    first = sentences[0]
+    words = first.split()
+    if len(words) < 2:
+        return text
+
+    opener = words[0].lower()
+
+    # Rearrangement strategies
+    alternatives = {
+        "the": ["This", "A", "One", "Our"],
+        "this": ["The", "One", "Such"],
+        "we": ["Our", "The"],
+        "it": ["The", "This"],
+        "in": ["Within", "Across", "Throughout"],
+        "these": ["The", "Such", "Our"],
+        "our": ["The", "This"],
+        "look": ["Consider", "Note that", "Examining"],
+        "here": ["At this point", "In this section", "Now"],
+        "so": ["Thus", "As a result", "Accordingly"],
+        "and": ["Additionally", "Beyond this", "Further"],
+    }
+
+    if opener in alternatives:
+        replacement = random.choice(alternatives[opener])
+        words[0] = replacement
+        # Fix case of second word if needed
+        if len(words) > 1 and words[1][0].isupper() and opener not in ("i",):
+            words[1] = words[1][0].lower() + words[1][1:]
+        sentences[0] = " ".join(words)
+
+    return " ".join(sentences)
+
+
+def _fix_repeated_transitions(paragraphs: list[str]) -> list[str]:
+    """Detect and vary repeated transitional phrases across the document."""
+    result = list(paragraphs)
+
+    # Count first-sentence starters across all paragraphs
+    starters = []
+    for p in result:
+        sents = sent_tokenize(p)
+        if sents:
+            first_two = " ".join(sents[0].split()[:2]).lower()
+            starters.append(first_two)
+        else:
+            starters.append("")
+
+    # Find starters used more than twice
+    from collections import Counter
+    counts = Counter(starters)
+    overused = {s for s, count in counts.items() if count > 2 and s}
+
+    if not overused:
+        return result
+
+    # Fix: for the 3rd+ occurrence of any starter, rewrite the opener
+    seen = Counter()
+    for i, starter in enumerate(starters):
+        if starter in overused:
+            seen[starter] += 1
+            if seen[starter] > 2:
+                result[i] = _rewrite_opener(result[i])
+
+    return result

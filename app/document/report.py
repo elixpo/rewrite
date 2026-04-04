@@ -10,6 +10,7 @@ Generates a professional annotated report with:
 import io
 import logging
 import math
+import re
 from datetime import datetime
 from typing import Optional
 
@@ -50,12 +51,23 @@ def _bg_hex(score: float, opacity: float = 0.12) -> str:
 
 def _escape(text: str) -> str:
     """Escape XML entities for ReportLab paragraphs."""
-    return (
+    result = (
         text.replace("&", "&amp;")
         .replace("<", "&lt;")
         .replace(">", "&gt;")
         .replace('"', "&quot;")
     )
+    # Clean raw LaTeX math for PDF display
+    # Replace $$ ... $$ display math with [equation]
+    result = re.sub(r"\$\$.*?\$\$", "[equation]", result, flags=re.DOTALL)
+    # Replace $ ... $ inline math — keep content but strip dollar signs
+    result = re.sub(r"\$([^$]+)\$", r"\1", result)
+    # Clean leftover LaTeX commands
+    result = re.sub(r"\\text\{([^}]*)\}", r"\1", result)
+    result = re.sub(r"\\(?:frac|sqrt|sum|int|prod)\{[^}]*\}", "[math]", result)
+    result = re.sub(r"\\[a-zA-Z]+", "", result)
+    result = result.replace("{", "").replace("}", "")
+    return result
 
 
 def generate_report(
