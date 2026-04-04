@@ -100,7 +100,9 @@ def cmd_detect(args):
 
         for i, seg in enumerate(seg_result["segments"]):
             seg_color = score_color(seg["score"])
-            print(f"  {c(f'Segment {i + 1}:', 'bold')} {c(f'{seg[\"score\"]}%', seg_color)} — {c(seg['verdict'], seg_color)}")
+            seg_score = seg["score"]
+            seg_verdict = seg["verdict"]
+            print(f"  {c(f'Segment {i + 1}:', 'bold')} {c(f'{seg_score}%', seg_color)} — {c(seg_verdict, seg_color)}")
             preview = seg["text"][:80] + "..." if len(seg["text"]) > 80 else seg["text"]
             print(f"    {c(preview, 'dim')}\n")
 
