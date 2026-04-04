@@ -79,9 +79,9 @@ HEURISTIC_WEIGHTS = {
 PARAPHRASE_TARGET_SCORE = 20  # rewrite segments above this
 PARAPHRASE_MAX_RETRIES = 3
 PARAPHRASE_INTENSITIES = {
-    "light": 1,
-    "medium": 1.5,
-    "aggressive": 1.8,
+    "light": 0.5,
+    "medium": 0.6,
+    "aggressive": 0.7,
 }
 
 # --- Segmentation ---

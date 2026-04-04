@@ -54,21 +54,33 @@ def paraphrase(
     original_result = detect_heuristic_only(text)
     original_score = original_result["score"]
 
-    temperature = PARAPHRASE_INTENSITIES.get(intensity, 1.0)
+    # Low temperatures produce more coherent, human-like text
+    temp_schedule = [0.6, 0.7, 0.8]
 
     best_text = text
     best_score = original_score
     best_similarity = 1.0
     attempts = 0
-    intensities = ["light", "medium", "aggressive"]
+    original_text = text  # preserve original for retries
 
-    # Escalate intensity on retries
-    current_intensity = intensity
+    # Start aggressive — light/medium don't reduce scores enough
+    current_intensity = "aggressive" if intensity != "light" else intensity
 
     for attempt in range(1, max_retries + 1):
         attempts = attempt
+        temperature = temp_schedule[min(attempt - 1, len(temp_schedule) - 1)]
 
-        messages = build_messages(text, intensity=current_intensity, domain=domain)
+        # Build detection feedback from best attempt so far
+        feedback = ""
+        if attempt > 1 and best_score > 35:
+            from app.paraphrase.prompts import build_detection_feedback
+            best_result = detect_heuristic_only(best_text)
+            feedback = build_detection_feedback(best_text, best_result["features"])
+
+        messages = build_messages(
+            original_text, intensity=current_intensity, domain=domain,
+            feedback=feedback,
+        )
         rewritten = chat(
             messages=messages,
             model=model,
@@ -86,14 +98,12 @@ def paraphrase(
         # Check semantic similarity
         sim = 1.0
         if check_similarity:
-            sim = _check_similarity(text, rewritten)
+            sim = _check_similarity(original_text, rewritten)
             if sim < SIMILARITY_THRESHOLD:
                 logger.warning(
                     "Attempt %d: similarity %.2f below threshold %.2f — rejecting",
                     attempt, sim, SIMILARITY_THRESHOLD,
                 )
-                # Don't accept this rewrite, try again with adjusted prompt
-                temperature = min(1.5, temperature + 0.1)
                 continue
 
         if score < best_score:
@@ -104,15 +114,6 @@ def paraphrase(
         # Good enough
         if score < 35:
             break
-
-        # Escalate for next attempt
-        temperature = min(1.5, temperature + 0.2)
-        idx = intensities.index(current_intensity) if current_intensity in intensities else 1
-        if idx < len(intensities) - 1:
-            current_intensity = intensities[idx + 1]
-
-        # Use the rewritten text as input for next iteration
-        text = rewritten
 
     final_result = detect_heuristic_only(best_text)
 

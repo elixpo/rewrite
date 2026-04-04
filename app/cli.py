@@ -374,9 +374,9 @@ def cmd_process(args):
 
     rewritten_paragraphs = [p.text for p in paragraphs]
 
-    # Escalating intensity: start at medium, go aggressive fast
-    intensity_schedule = ["medium", "aggressive", "aggressive", "aggressive", "aggressive"]
-    temp_schedule = [0.95, 1.1, 1.25, 1.4, 1.5]
+    # Escalating intensity: start aggressive, keep temps LOW for coherent output
+    intensity_schedule = ["aggressive", "aggressive", "aggressive", "aggressive", "aggressive"]
+    temp_schedule = [0.6, 0.7, 0.8, 0.85, 0.9]
 
     for step, (para_idx, score_info) in enumerate(flagged):
         para_text = paragraphs[para_idx].text
@@ -412,12 +412,12 @@ def cmd_process(args):
             print(f"    Attempt {attempt+1}/{max_attempts} ({c(intensity, 'cyan')}, temp={temp:.2f})...", end=" ", flush=True)
 
             try:
-                # On later attempts, build specific detection feedback
+                # Always provide detection feedback — tells the LLM exactly what to fix
                 feedback = ""
-                if attempt >= 1 and best_score > threshold:
-                    from app.paraphrase.prompts import build_detection_feedback
-                    best_result = detect_heuristic_only(best_text)
-                    feedback = build_detection_feedback(best_text, best_result["features"])
+                from app.paraphrase.prompts import build_detection_feedback
+                source_for_feedback = best_text if attempt > 0 else para_text
+                feedback_result = detect_heuristic_only(source_for_feedback)
+                feedback = build_detection_feedback(source_for_feedback, feedback_result["features"])
 
                 messages = build_messages(
                     current_input, intensity=intensity,
@@ -435,7 +435,8 @@ def cmd_process(args):
                 if new_score < best_score:
                     best_text = rewritten
                     best_score = new_score
-                    current_input = rewritten  # feed improved version forward
+                # Always rewrite from ORIGINAL — feeding bad rewrites forward compounds errors
+                current_input = para_text
 
                 arrow = c("\u2193", "green") if new_score < original_score else c("\u2191", "red")
                 print(f"{c(f'{new_score:.1f}%', score_color(new_score))} {arrow}")
