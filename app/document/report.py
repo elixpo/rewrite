@@ -152,25 +152,27 @@ def generate_report(
         [[
             RLPara(
                 f'<font size="42" color="{score_color}"><b>{score_display}%</b></font>',
-                ParagraphStyle("gauge", alignment=TA_CENTER, spaceAfter=0),
+                ParagraphStyle("gauge", alignment=TA_CENTER, spaceAfter=0, leading=50),
             ),
         ],
         [
             RLPara(
                 f'<font size="13" color="{score_color}"><b>{_escape(overall_verdict)}</b></font>',
-                ParagraphStyle("verdict_label", alignment=TA_CENTER, spaceBefore=0),
+                ParagraphStyle("verdict_label", alignment=TA_CENTER, spaceBefore=2, leading=18),
             ),
         ],
         [
             RLPara("AI-Generated Content Likelihood", s_center),
         ]],
-        colWidths=[200],
+        colWidths=[220],
+        rowHeights=[52, 22, 18],
     )
     gauge_table.setStyle(TableStyle([
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING", (0, 0), (-1, -1), 2),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ("VALIGN", (0, 0), (0, 0), "BOTTOM"),
+        ("VALIGN", (0, 1), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
     ]))
 
     # --- Score distribution bar ---
