@@ -162,7 +162,8 @@ def cmd_paraphrase(args):
         print(f"  Flagged: {result['flagged_count']} paragraphs  |  Rewritten: {result['rewritten_count']}")
 
         if result["needs_review"]:
-            print(f"  {c(f'⚠ {len(result[\"needs_review\"])} paragraph(s) need manual review', 'yellow')}")
+            review_count = len(result["needs_review"])
+            print(f"  {c(f'Warning: {review_count} paragraph(s) need manual review', 'yellow')}")
     else:
         result = paraphrase(
             text, intensity=intensity, model=model, domain=domain,
@@ -174,7 +175,8 @@ def cmd_paraphrase(args):
         print(f"\n  Score: {c(f'{before}%', score_color(before))} → {c(f'{after}%', score_color(after))}  ({result['attempts']} pass{'es' if result['attempts'] > 1 else ''})")
         print(f"  Verdict: {c(result['final_verdict'], score_color(after))}")
         if result.get("similarity") and result["similarity"] < 1.0:
-            print(f"  Similarity: {c(f'{result[\"similarity\"]:.1%}', 'cyan')}")
+            sim_pct = f"{result['similarity']:.1%}"
+            print(f"  Similarity: {c(sim_pct, 'cyan')}")
 
     print(f"\n  {c('Feature Breakdown:', 'bold')}\n")
     labels = {
