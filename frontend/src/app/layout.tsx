@@ -25,8 +25,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${dmSans.variable} ${spaceGrotesk.variable}`}>
-      <body className="antialiased min-h-screen">
+    <html lang="en" className={`${dmSans.variable} ${spaceGrotesk.variable}`} suppressHydrationWarning>
+      <body className="antialiased min-h-screen" suppressHydrationWarning>
         <nav className="border-b border-border-light">
           <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
             <a href="/" className="text-xl font-bold font-[family-name:var(--font-display)] text-gradient">
