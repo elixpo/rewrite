@@ -176,7 +176,7 @@ export default function Home() {
     <div className="space-y-5">
       {/* Hero */}
       <div className="text-center space-y-2 pt-4">
-        <h1 className="text-3xl font-bold font-[family-name:var(--font-display)] text-gradient">
+        <h1 className="text-3xl font-bold font-display text-gradient">
           ReWrite
         </h1>
         <p className="text-text-muted text-sm">
@@ -259,7 +259,7 @@ export default function Home() {
         <div className="glass-card p-5 space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-sm font-semibold font-[family-name:var(--font-display)] text-text-primary">
+              <h2 className="text-sm font-semibold font-display text-text-primary">
                 {isCompleted ? "Rewrite Complete" : isFailed ? "Session Failed" : "Rewriting..."}
               </h2>
               <p className="text-text-subtle text-[10px] font-mono mt-0.5">{sessionId}</p>
@@ -343,7 +343,7 @@ export default function Home() {
       {detectResult && !sessionId && (
         <div className="glass-card p-5 space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold font-[family-name:var(--font-display)] text-text-primary">Detection Results</h2>
+            <h2 className="text-sm font-semibold font-display text-text-primary">Detection Results</h2>
             <ScoreBadge score={detectResult.score} size="lg" />
           </div>
           <p className="text-text-muted text-xs">

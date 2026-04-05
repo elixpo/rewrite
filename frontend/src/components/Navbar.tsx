@@ -51,7 +51,7 @@ export function Navbar() {
   return (
     <nav className="border-b border-border-light">
       <div className="max-w-5xl mx-auto px-6 py-3 flex items-center justify-between">
-        <a href="/" className="text-lg font-bold font-[family-name:var(--font-display)] text-gradient">
+        <a href="/" className="text-lg font-bold font-display text-gradient">
           ReWrite
         </a>
         <div className="flex items-center gap-4 text-xs">
