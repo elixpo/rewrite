@@ -72,7 +72,7 @@ class ParaphraseTextRequest(BaseModel):
 
 
 class ParaphraseResponse(BaseModel):
-    job_id: str
+    job_id: str  # This is the session_id — store in localStorage for resume
 
 
 # --- Jobs ---

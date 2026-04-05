@@ -1,4 +1,4 @@
-"""Paraphrase endpoints — returns job ID for async polling."""
+"""Paraphrase endpoints — session-based, resumable background processing."""
 
 import os
 import tempfile
@@ -13,8 +13,9 @@ from app.api.schemas import (
     MAX_FILE_SIZE,
     Domain,
     Intensity,
+    JobStatus,
 )
-from app.api.jobs import create_job, update_job, run_in_background
+from app.api.jobs import create_session, get_session, save_session, run_in_background
 from app.detection.ensemble import detect_heuristic_only
 from app.detection.segment import segment_by_paragraphs
 from app.paraphrase.prompts import build_messages, build_detection_feedback
@@ -26,8 +27,19 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["paraphrase"])
 
 
-def _run_paraphrase(job_id: str, text: str, intensity: str, domain: str):
-    """Background task: paraphrase all flagged paragraphs."""
+def _run_paraphrase(session_id: str):
+    """Background task: paraphrase flagged paragraphs with full state persistence.
+
+    Resumable: if the server crashed mid-job, calling this again with the same
+    session_id picks up from the last completed paragraph.
+    """
+    session = get_session(session_id)
+    if not session:
+        raise RuntimeError(f"Session {session_id} not found")
+
+    text = session["original_text"]
+    intensity = session.get("intensity", "aggressive")
+    domain = session.get("domain", "general")
     threshold = 20
     max_attempts = 5
     model = DEFAULT_MODEL
@@ -36,25 +48,42 @@ def _run_paraphrase(job_id: str, text: str, intensity: str, domain: str):
     if not paragraphs:
         return {"rewritten": text, "original_score": 0, "final_score": 0, "paragraphs": []}
 
-    # Score each paragraph
-    scores = []
-    para_progress = []
-    for i, para in enumerate(paragraphs):
-        if len(para.strip()) < 30:
-            scores.append({"score": 0, "verdict": "Too short", "features": {}})
-        else:
-            scores.append(detect_heuristic_only(para))
-        para_progress.append({
-            "index": i,
-            "original_score": round(scores[i]["score"], 1),
-            "current_score": None,
-            "status": "pending",
-        })
+    # Check if we have existing state (resume scenario)
+    para_progress = session.get("paragraphs", [])
+    rewritten_paragraphs = session.get("rewritten_paragraphs", [])
+    original_scores = session.get("original_scores", [])
 
-    update_job(job_id, paragraphs=para_progress)
+    # Initialize state if fresh start
+    if not para_progress or len(para_progress) != len(paragraphs):
+        original_scores = []
+        para_progress = []
+        for i, para in enumerate(paragraphs):
+            if len(para.strip()) < 30:
+                score_result = {"score": 0, "verdict": "Too short", "features": {}}
+            else:
+                score_result = detect_heuristic_only(para)
+            original_scores.append(score_result)
+            para_progress.append({
+                "index": i,
+                "original_score": round(score_result["score"], 1),
+                "current_score": None,
+                "status": "pending",
+            })
+        rewritten_paragraphs = list(paragraphs)
 
-    flagged = [(i, scores[i]) for i in range(len(paragraphs)) if scores[i]["score"] > threshold]
+        # Persist initial scoring state
+        session["paragraphs"] = para_progress
+        session["rewritten_paragraphs"] = rewritten_paragraphs
+        session["original_scores"] = [{"score": s["score"]} for s in original_scores]
+        save_session(session_id, session)
+
+    flagged = [
+        (i, original_scores[i])
+        for i in range(len(paragraphs))
+        if original_scores[i]["score"] > threshold
+    ]
     total_steps = len(flagged)
+
     if total_steps == 0:
         overall = detect_heuristic_only(text)
         return {
@@ -64,20 +93,25 @@ def _run_paraphrase(job_id: str, text: str, intensity: str, domain: str):
             "paragraphs": para_progress,
         }
 
-    rewritten_paragraphs = list(paragraphs)
     temp_schedule = [0.6, 0.7, 0.8, 0.85, 0.9]
-    intensity_schedule = ["aggressive"] * 5
 
     for step, (para_idx, score_info) in enumerate(flagged):
+        # RESUME CHECK: skip paragraphs already completed
+        if para_progress[para_idx]["status"] == "done":
+            continue
+
         para_text = paragraphs[para_idx]
         original_score = score_info["score"]
 
-        # Update progress
+        # Mark as rewriting + persist
         para_progress[para_idx]["status"] = "rewriting"
-        progress_pct = (step / total_steps) * 100
-        update_job(job_id, paragraphs=para_progress, progress=progress_pct)
+        completed_count = sum(1 for p in para_progress if p["status"] == "done")
+        progress_pct = (completed_count / total_steps) * 100
+        session["paragraphs"] = para_progress
+        session["progress"] = progress_pct
+        save_session(session_id, session)
 
-        # Build context
+        # Build context from neighbors
         context_parts = []
         if para_idx > 0:
             context_parts.append(f"[Previous]: {paragraphs[para_idx - 1][:200]}")
@@ -89,17 +123,15 @@ def _run_paraphrase(job_id: str, text: str, intensity: str, domain: str):
         best_score = original_score
 
         for attempt in range(max_attempts):
-            attempt_intensity = intensity_schedule[min(attempt, len(intensity_schedule) - 1)]
             temp = temp_schedule[min(attempt, len(temp_schedule) - 1)]
 
             try:
-                # Detection feedback
                 source = best_text if attempt > 0 else para_text
                 fb_result = detect_heuristic_only(source)
                 feedback = build_detection_feedback(source, fb_result["features"])
 
                 messages = build_messages(
-                    para_text, intensity=attempt_intensity,
+                    para_text, intensity="aggressive",
                     domain=domain, context=context,
                     feedback=feedback,
                 )
@@ -117,13 +149,19 @@ def _run_paraphrase(job_id: str, text: str, intensity: str, domain: str):
                 if best_score <= threshold:
                     break
             except Exception as e:
-                logger.warning("Paraphrase attempt %d failed for para %d: %s", attempt, para_idx, e)
+                logger.warning("Attempt %d failed for para %d: %s", attempt, para_idx, e)
                 break
 
+        # Save completed paragraph immediately (crash-safe)
         rewritten_paragraphs[para_idx] = best_text
         para_progress[para_idx]["current_score"] = round(best_score, 1)
         para_progress[para_idx]["status"] = "done"
-        update_job(job_id, paragraphs=para_progress)
+
+        session["paragraphs"] = para_progress
+        session["rewritten_paragraphs"] = rewritten_paragraphs
+        completed_count = sum(1 for p in para_progress if p["status"] == "done")
+        session["progress"] = (completed_count / total_steps) * 100
+        save_session(session_id, session)
 
     # Global post-processing
     rewritten_paragraphs = global_postprocess(rewritten_paragraphs, paragraphs)
@@ -132,11 +170,11 @@ def _run_paraphrase(job_id: str, text: str, intensity: str, domain: str):
     overall_before = detect_heuristic_only(text)
     overall_after = detect_heuristic_only(final_text)
 
-    # Fill in scores for unflagged paragraphs
-    for i in range(len(para_progress)):
-        if para_progress[i]["status"] == "pending":
-            para_progress[i]["current_score"] = para_progress[i]["original_score"]
-            para_progress[i]["status"] = "done"
+    # Mark remaining as done
+    for p in para_progress:
+        if p["status"] == "pending":
+            p["current_score"] = p["original_score"]
+            p["status"] = "done"
 
     return {
         "rewritten": final_text,
@@ -148,11 +186,19 @@ def _run_paraphrase(job_id: str, text: str, intensity: str, domain: str):
 
 @router.post("/paraphrase", response_model=ParaphraseResponse)
 def paraphrase_text(req: ParaphraseTextRequest):
-    """Start a paraphrase job. Returns job_id for polling via GET /api/job/{id}."""
+    """Start a paraphrase job. Returns session_id for polling via GET /api/session/{id}."""
     text = req.text.strip()
-    job_id = create_job()
-    run_in_background(_run_paraphrase, job_id, text, req.intensity.value, req.domain.value)
-    return ParaphraseResponse(job_id=job_id)
+    session_id = create_session()
+
+    # Store the input text and config in the session
+    session = get_session(session_id)
+    session["original_text"] = text
+    session["intensity"] = req.intensity.value
+    session["domain"] = req.domain.value
+    save_session(session_id, session)
+
+    run_in_background(_run_paraphrase, session_id)
+    return ParaphraseResponse(job_id=session_id)
 
 
 @router.post("/paraphrase/file", response_model=ParaphraseResponse)
@@ -172,7 +218,6 @@ async def paraphrase_file(
     if len(content) > MAX_FILE_SIZE:
         raise HTTPException(413, f"File too large. Max: {MAX_FILE_SIZE // 1024 // 1024} MB")
 
-    # Parse the file
     with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
         tmp.write(content)
         tmp_path = tmp.name
@@ -187,6 +232,38 @@ async def paraphrase_file(
     if len(text.strip()) < 50:
         raise HTTPException(422, "Extracted text too short (< 50 characters)")
 
-    job_id = create_job()
-    run_in_background(_run_paraphrase, job_id, text[:100_000], intensity.value, domain.value)
-    return ParaphraseResponse(job_id=job_id)
+    session_id = create_session()
+    session = get_session(session_id)
+    session["original_text"] = text[:100_000]
+    session["intensity"] = intensity.value
+    session["domain"] = domain.value
+    session["filename"] = file.filename
+    save_session(session_id, session)
+
+    run_in_background(_run_paraphrase, session_id)
+    return ParaphraseResponse(job_id=session_id)
+
+
+@router.post("/session/{session_id}/resume")
+def resume_session(session_id: str):
+    """Resume a failed or interrupted session from where it left off."""
+    session = get_session(session_id)
+    if not session:
+        raise HTTPException(404, "Session not found or expired")
+
+    status = session.get("status")
+    if status == JobStatus.completed.value:
+        return {"message": "Session already completed", "session_id": session_id}
+    if status == JobStatus.running.value:
+        return {"message": "Session is already running", "session_id": session_id}
+
+    if not session.get("original_text"):
+        raise HTTPException(422, "Session has no text to process")
+
+    # Reset status and re-run (will skip already-completed paragraphs)
+    session["status"] = JobStatus.pending.value
+    session["error"] = None
+    save_session(session_id, session)
+
+    run_in_background(_run_paraphrase, session_id)
+    return {"message": "Session resumed", "session_id": session_id}

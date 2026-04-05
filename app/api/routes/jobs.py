@@ -1,4 +1,4 @@
-"""Job polling and report download endpoints."""
+"""Session polling and report download endpoints."""
 
 import os
 import tempfile
@@ -8,50 +8,53 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
 from app.api.schemas import JobResponse, JobStatus
-from app.api.jobs import get_job
+from app.api.jobs import get_session
 from app.detection.ensemble import detect_heuristic_only
 from app.document.structure import Document
 from app.document.report import generate_report
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api", tags=["jobs"])
+router = APIRouter(prefix="/api", tags=["sessions"])
 
 
-@router.get("/job/{job_id}", response_model=JobResponse)
-def poll_job(job_id: str):
-    """Poll job status and progress."""
-    job = get_job(job_id)
-    if job is None:
-        raise HTTPException(404, "Job not found or expired")
+@router.get("/session/{session_id}", response_model=JobResponse)
+def poll_session(session_id: str):
+    """Poll session status and per-paragraph progress.
+
+    Frontend should poll this every 2-3 seconds while status is 'running'.
+    The session_id is stable across reloads — store it in localStorage.
+    """
+    session = get_session(session_id)
+    if session is None:
+        raise HTTPException(404, "Session not found or expired")
 
     return JobResponse(
-        job_id=job_id,
-        status=job["status"],
-        progress=job.get("progress", 0),
-        paragraphs=job.get("paragraphs", []),
-        result=job.get("result"),
-        error=job.get("error"),
+        job_id=session_id,
+        status=JobStatus(session["status"]),
+        progress=session.get("progress", 0),
+        paragraphs=session.get("paragraphs", []),
+        result=session.get("result"),
+        error=session.get("error"),
     )
 
 
-@router.get("/report/{job_id}/pdf")
-def download_report(job_id: str):
-    """Generate and download a PDF report for a completed job."""
-    job = get_job(job_id)
-    if job is None:
-        raise HTTPException(404, "Job not found or expired")
+@router.get("/session/{session_id}/report")
+def download_report(session_id: str):
+    """Generate and download a PDF report for a completed session."""
+    session = get_session(session_id)
+    if session is None:
+        raise HTTPException(404, "Session not found or expired")
 
-    if job["status"] != JobStatus.completed:
-        raise HTTPException(409, f"Job is {job['status'].value}, not completed")
+    if session["status"] != JobStatus.completed.value:
+        raise HTTPException(409, f"Session is {session['status']}, not completed")
 
-    result = job.get("result")
+    result = session.get("result")
     if not result or "rewritten" not in result:
-        raise HTTPException(500, "Job result missing rewritten text")
+        raise HTTPException(500, "Session result missing rewritten text")
 
     rewritten_text = result["rewritten"]
     doc = Document.from_text(rewritten_text)
 
-    # Score each paragraph for the report
     seg_scores = []
     for para in doc.paragraphs:
         if len(para.text.strip()) < 30:
@@ -62,7 +65,6 @@ def download_report(job_id: str):
 
     overall = detect_heuristic_only(rewritten_text)
 
-    # Generate PDF to temp file
     tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
     tmp.close()
 
@@ -78,8 +80,21 @@ def download_report(job_id: str):
         return FileResponse(
             tmp.name,
             media_type="application/pdf",
-            filename=f"rewrite_report_{job_id}.pdf",
+            filename=f"rewrite_report_{session_id}.pdf",
         )
     except Exception as e:
         os.unlink(tmp.name)
         raise HTTPException(500, f"Report generation failed: {e}")
+
+
+# Keep legacy /api/job/{id} route for backwards compat
+@router.get("/job/{job_id}", response_model=JobResponse)
+def poll_job_legacy(job_id: str):
+    """Legacy endpoint — redirects to session polling."""
+    return poll_session(job_id)
+
+
+@router.get("/report/{job_id}/pdf")
+def download_report_legacy(job_id: str):
+    """Legacy endpoint — redirects to session report."""
+    return download_report(job_id)
