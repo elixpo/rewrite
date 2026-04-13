@@ -18,14 +18,17 @@ import {
   incrementGuestUsage,
 } from "@/lib/api";
 import type { DetectResult, SessionState, ParagraphProgress } from "@/lib/api";
-
-const GUEST_CHECK_LIMIT = 2;
+import { getLimits } from "@/lib/plans";
 
 export default function Home() {
   const [texContent, setTexContent] = useState("");
   const [domain, setDomain] = useState("general");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loggedIn, setLoggedIn] = useState(false);
+
+  const limits = getLimits(loggedIn, false); // TODO: check pro status
+  const wordCount = texContent.trim().split(/\s+/).filter(Boolean).length;
 
   // Detection results
   const [detectResult, setDetectResult] = useState<DetectResult | null>(null);
@@ -39,8 +42,9 @@ export default function Home() {
   // File input ref
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Resume existing session on load
+  // Init auth state + resume existing session
   useEffect(() => {
+    setLoggedIn(isLoggedIn());
     const existing = getActiveSessionId();
     if (existing) {
       setSessionIdState(existing);
@@ -79,10 +83,17 @@ export default function Home() {
 
   // Check AI score
   const handleCheck = async () => {
-    if (!isLoggedIn()) {
+    // Word limit enforcement
+    if (wordCount > limits.maxWords) {
+      setError(`Text exceeds ${limits.maxWords.toLocaleString()} word limit. ${loggedIn ? "Upgrade to Pro for 25,000 words." : "Sign in for 1,000 words."}`);
+      return;
+    }
+
+    // Daily check limit
+    if (!loggedIn) {
       const usage = getGuestUsageToday();
-      if (usage >= GUEST_CHECK_LIMIT) {
-        setError(`Guest limit reached (${GUEST_CHECK_LIMIT} checks/day). Sign in for more.`);
+      if (usage >= limits.checksPerDay) {
+        setError(`Daily limit reached (${limits.checksPerDay} checks/day). Sign in for ${getLimits(true, false).checksPerDay}/day.`);
         return;
       }
     }
