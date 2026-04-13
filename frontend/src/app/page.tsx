@@ -42,9 +42,8 @@ export default function Home() {
   // File input ref
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Init auth state + resume existing session
+  // Resume existing session on load
   useEffect(() => {
-    setLoggedIn(isLoggedIn());
     const existing = getActiveSessionId();
     if (existing) {
       setSessionIdState(existing);
