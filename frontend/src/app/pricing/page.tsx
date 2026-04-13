@@ -1,8 +1,8 @@
 "use client";
 
 import { startLogin } from "@/lib/auth";
-import { isLoggedIn } from "@/lib/api";
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useAuth } from "@/lib/AuthContext";
 
 const plans = [
   {
@@ -74,9 +74,8 @@ const comparisonRows = [
 ];
 
 export default function PricingPage() {
-  const [loggedIn, setLoggedIn] = useState(false);
+  const { loggedIn } = useAuth();
   const [yearly, setYearly] = useState(false);
-  useEffect(() => { setLoggedIn(isLoggedIn()); }, []);
 
   const proPrice = yearly ? "$3.99" : "$4.99";
   const proPeriod = yearly ? "/mo billed yearly" : "/month";
