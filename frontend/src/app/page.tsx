@@ -54,7 +54,7 @@ export default function Home() {
   };
 
   return (
-    <div className="max-w-3xl mx-auto space-y-8 pt-12">
+    <div className="max-w-3xl mx-auto px-6 space-y-8 pt-12 pb-16">
       {/* Hero */}
       <div className="text-center space-y-3">
         <h1 className="text-4xl font-bold font-display text-gradient">
