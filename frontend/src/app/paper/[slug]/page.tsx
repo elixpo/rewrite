@@ -103,8 +103,13 @@ export default function PaperPage({ params }: { params: Promise<{ slug: string }
       }
     }
 
-    // Cancel any previous detection stream
+    // Cancel any previous streams
     detectCancelRef.current?.();
+    cleanupRef.current?.();
+
+    // Clear rewrite state so sidebar switches to detection view
+    setSessionId(null);
+    setSessionState(null);
 
     setLoading(true);
     setError(null);
