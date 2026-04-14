@@ -17,7 +17,7 @@ from app.api.schemas import (
 )
 from app.api.jobs import create_session, get_session, save_session, run_in_background
 from app.detection.ensemble import detect_heuristic_only
-from app.detection.segment import segment_by_paragraphs
+from app.detection.segment import segment_by_paragraphs, is_prose_paragraph
 from app.paraphrase.prompts import build_messages, build_detection_feedback
 from app.paraphrase.postprocess import postprocess, normalize_length, global_postprocess
 from app.core.llm import chat
@@ -58,8 +58,9 @@ def _run_paraphrase(session_id: str):
         original_scores = []
         para_progress = []
         for i, para in enumerate(paragraphs):
-            if len(para.strip()) < 30:
-                score_result = {"score": 0, "verdict": "Too short", "features": {}}
+            prose = is_prose_paragraph(para)
+            if not prose or len(para.strip()) < 30:
+                score_result = {"score": 0, "verdict": "Skipped", "features": {}}
             else:
                 score_result = detect_heuristic_only(para)
             original_scores.append(score_result)
@@ -67,7 +68,7 @@ def _run_paraphrase(session_id: str):
                 "index": i,
                 "original_score": round(score_result["score"], 1),
                 "current_score": None,
-                "status": "pending",
+                "status": "skipped" if not prose else "pending",
                 "attempts": 0,
                 "max_attempts": 0,
                 "reduction": 0,
