@@ -305,11 +305,17 @@ export function streamSession(
 
   (async () => {
     try {
-      const resp = await fetch(`${API_BASE}/api/session/${sessionId}/stream`, {
-        signal: controller.signal,
-      });
+      // Retry connection up to 3 times (session may not be in Redis yet)
+      let resp: Response | null = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        resp = await fetch(`${API_BASE}/api/session/${sessionId}/stream`, {
+          signal: controller.signal,
+        });
+        if (resp.ok && resp.body) break;
+        if (attempt < 2) await new Promise((r) => setTimeout(r, 1000));
+      }
 
-      if (!resp.ok || !resp.body) {
+      if (!resp || !resp.ok || !resp.body) {
         onError("Failed to connect to session stream");
         return;
       }

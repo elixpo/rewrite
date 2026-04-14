@@ -160,14 +160,16 @@ export default function PaperPage({ params }: { params: Promise<{ slug: string }
 
     setLoading(true);
     setError(null);
+    setSidebarOpen(true);
     try {
       const data = await startParaphrase(texContent, domain);
       const sid = data.session_id || data.job_id;
       if (sid) {
         setSessionId(sid);
         setActiveSessionId(sid);
+        // Small delay to let the backend create the Redis session before SSE connects
+        await new Promise((r) => setTimeout(r, 500));
         startStreaming(sid);
-        setSidebarOpen(true);
       }
     } catch (err: any) {
       setError(err.message);
@@ -239,19 +241,19 @@ export default function PaperPage({ params }: { params: Promise<{ slug: string }
             </span>
 
             <button
-              onClick={handleCheck}
-              disabled={loading || isRunning || wordCount < 10}
-              className="btn-ghost px-3 py-1 rounded-lg text-xs font-semibold"
-            >
-              {loading && !sessionId ? "Checking..." : "Check AI %"}
-            </button>
-            <button
               onClick={handleRewrite}
               disabled={loading || isRunning || wordCount < 10 || !loggedIn}
               className="btn-primary px-3 py-1 rounded-lg text-xs"
               title={!loggedIn ? "Sign in to rewrite" : undefined}
             >
               {loading && sessionId ? "Starting..." : "Rewrite"}
+            </button>
+            <button
+              onClick={handleCheck}
+              disabled={loading || isRunning || wordCount < 10}
+              className="btn-ghost px-3 py-1 rounded-lg text-xs font-semibold"
+            >
+              {loading && !sessionId ? "Checking..." : "Check AI %"}
             </button>
             {!sidebarOpen && (detectResult || sessionState) && (
               <button
