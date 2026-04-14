@@ -301,32 +301,64 @@ export function streamSession(
   onDone: (data: SessionState) => void,
   onError: (error: string) => void,
 ): () => void {
-  const url = `${API_BASE}/api/session/${sessionId}/stream`;
-  const es = new EventSource(url);
+  const controller = new AbortController();
 
-  es.addEventListener("progress", (e) => {
-    const data = JSON.parse((e as MessageEvent).data);
-    onProgress({ session_id: sessionId, ...data });
-  });
+  (async () => {
+    try {
+      const resp = await fetch(`${API_BASE}/api/session/${sessionId}/stream`, {
+        signal: controller.signal,
+      });
 
-  es.addEventListener("done", (e) => {
-    const data = JSON.parse((e as MessageEvent).data);
-    onDone({ session_id: sessionId, ...data });
-    es.close();
-  });
+      if (!resp.ok || !resp.body) {
+        onError("Failed to connect to session stream");
+        return;
+      }
 
-  es.addEventListener("error", (e) => {
-    if (e instanceof MessageEvent) {
-      const data = JSON.parse(e.data);
-      onError(data.error || "Stream error");
-    } else {
-      onError("Connection lost");
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() || "";
+
+        for (const part of parts) {
+          if (!part.trim() || part.startsWith(":")) continue;
+
+          let eventType = "message";
+          let data = "";
+          for (const line of part.split("\n")) {
+            if (line.startsWith("event: ")) eventType = line.slice(7);
+            else if (line.startsWith("data: ")) data = line.slice(6);
+          }
+          if (!data) continue;
+
+          const parsed = JSON.parse(data);
+          switch (eventType) {
+            case "progress":
+              onProgress({ session_id: sessionId, ...parsed });
+              break;
+            case "done":
+              onDone({ session_id: sessionId, ...parsed });
+              return;
+            case "error":
+              onError(parsed.error || "Stream error");
+              return;
+          }
+        }
+      }
+    } catch (err: any) {
+      if (err.name !== "AbortError") {
+        onError(err.message || "Connection lost");
+      }
     }
-    es.close();
-  });
+  })();
 
-  // Return cleanup function
-  return () => es.close();
+  return () => controller.abort();
 }
 
 // --- Auth helpers ---
