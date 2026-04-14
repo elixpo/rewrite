@@ -192,14 +192,7 @@ export default function PaperPage({ params }: { params: Promise<{ slug: string }
     cleanupRef.current?.();
     detectCancelRef.current?.();
     clearActiveSession();
-    setSessionId(null);
-    setSessionState(null);
-    setDetectResult(null);
-    setLiveSegments([]);
-    setDetectProgress(0);
-    setDetectTotal(0);
-    setParagraphScores([]);
-    setError(null);
+    router.push("/");
   };
 
   const isRunning = sessionState?.status === "running" || sessionState?.status === "pending";
@@ -467,72 +460,108 @@ export default function PaperPage({ params }: { params: Promise<{ slug: string }
                   </div>
                 )}
 
-                {/* Summary scores */}
+                {/* Summary + actions */}
                 {isCompleted && sessionState.result && (
-                  <div className="pt-3 border-t border-border-light space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="text-center">
-                        <p className="text-text-subtle text-[10px] mb-1">Before</p>
-                        <ScoreBadge score={sessionState.result.original_score} size="md" />
-                      </div>
-                      <div className="flex flex-col items-center">
-                        <span className="text-text-subtle text-lg">→</span>
-                        <span className="text-success text-[10px] font-mono font-semibold">
-                          -{(sessionState.result.original_score - sessionState.result.final_score).toFixed(1)}%
+                  <div className="pt-3 border-t border-border-light space-y-4">
+                    {/* Score comparison */}
+                    <div className="bg-bg-glass rounded-xl p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-[10px] text-text-muted uppercase tracking-wider font-semibold">AI Score Reduction</span>
+                        <span className="text-success text-xs font-mono font-bold">
+                          ↓ {(sessionState.result.original_score - sessionState.result.final_score).toFixed(1)}%
                         </span>
                       </div>
-                      <div className="text-center">
-                        <p className="text-text-subtle text-[10px] mb-1">After</p>
-                        <ScoreBadge score={sessionState.result.final_score} size="md" />
+                      <div className="flex items-end gap-3">
+                        <div className="flex-1">
+                          <p className="text-text-subtle text-[10px] mb-1">Before</p>
+                          <div className="progress-track h-2.5">
+                            <div className="h-full rounded-full bg-error transition-all" style={{ width: `${sessionState.result.original_score}%` }} />
+                          </div>
+                          <p className="text-error text-xs font-mono mt-1">{sessionState.result.original_score.toFixed(1)}%</p>
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-text-subtle text-[10px] mb-1">After</p>
+                          <div className="progress-track h-2.5">
+                            <div className={`h-full rounded-full transition-all ${
+                              sessionState.result.final_score <= 20 ? "bg-success" : "bg-warning"
+                            }`} style={{ width: `${sessionState.result.final_score}%` }} />
+                          </div>
+                          <p className={`text-xs font-mono mt-1 ${
+                            sessionState.result.final_score <= 20 ? "text-success" : "text-warning"
+                          }`}>{sessionState.result.final_score.toFixed(1)}%</p>
+                        </div>
                       </div>
                     </div>
 
-                    {/* Stats row */}
-                    <div className="grid grid-cols-3 gap-2 text-center">
-                      <div className="bg-bg-glass rounded-lg p-2">
-                        <p className="text-text-primary text-sm font-bold font-mono">
-                          {sessionState.paragraphs.filter((p) => p.current_score !== null && p.current_score <= 20).length}
-                        </p>
-                        <p className="text-text-subtle text-[10px]">Passed</p>
+                    {/* Stats */}
+                    <div className="flex gap-2 text-center">
+                      {[
+                        { value: sessionState.paragraphs.filter((p) => p.current_score !== null && p.current_score <= 20).length, label: "Passed", color: "text-success" },
+                        { value: sessionState.paragraphs.filter((p) => p.current_score !== null && p.current_score > 20 && p.status !== "skipped").length, label: "Review", color: "text-warning" },
+                        { value: sessionState.paragraphs.filter((p) => p.status === "skipped").length, label: "Skipped", color: "text-text-subtle" },
+                      ].map((s) => (
+                        <div key={s.label} className="flex-1 bg-bg-glass rounded-lg py-2">
+                          <p className={`text-sm font-bold font-mono ${s.color}`}>{s.value}</p>
+                          <p className="text-text-subtle text-[9px]">{s.label}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Action buttons — stacked */}
+                    <div className="space-y-2">
+                      <button
+                        onClick={() => {
+                          if (!sessionState.result?.rewritten) return;
+                          const blob = new Blob([sessionState.result.rewritten], { type: "text/plain" });
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement("a");
+                          a.href = url; a.download = "rewritten.tex"; a.click();
+                          URL.revokeObjectURL(url);
+                          showToast("Downloaded rewritten.tex");
+                        }}
+                        className="btn-primary w-full py-2 rounded-lg text-xs flex items-center justify-center gap-2"
+                      >
+                        <DownloadIcon />
+                        Download .tex
+                      </button>
+                      <div className="flex gap-2">
+                        <a
+                          href={getReportUrl(sessionId)}
+                          target="_blank"
+                          className="btn-ghost flex-1 py-1.5 rounded-lg text-xs text-center flex items-center justify-center gap-1.5"
+                        >
+                          <DownloadIcon />
+                          Report PDF
+                        </a>
+                        <button
+                          onClick={() => {
+                            if (sessionState.result?.rewritten) {
+                              navigator.clipboard.writeText(sessionState.result.rewritten);
+                              showToast("Copied to clipboard");
+                            }
+                          }}
+                          className="btn-ghost flex-1 py-1.5 rounded-lg text-xs"
+                        >
+                          Copy text
+                        </button>
                       </div>
-                      <div className="bg-bg-glass rounded-lg p-2">
-                        <p className="text-warning text-sm font-bold font-mono">
-                          {sessionState.paragraphs.filter((p) => p.current_score !== null && p.current_score > 20).length}
-                        </p>
-                        <p className="text-text-subtle text-[10px]">Need review</p>
-                      </div>
-                      <div className="bg-bg-glass rounded-lg p-2">
-                        <p className="text-text-primary text-sm font-bold font-mono">
-                          {sessionState.paragraphs.length}
-                        </p>
-                        <p className="text-text-subtle text-[10px]">Total</p>
-                      </div>
+                      <button
+                        onClick={handleNewSession}
+                        className="btn-ghost w-full py-1.5 rounded-lg text-xs"
+                      >
+                        New paper
+                      </button>
                     </div>
                   </div>
                 )}
 
-                {/* Actions */}
-                <div className="flex flex-wrap gap-2 pt-1">
-                  {isFailed && (
-                    <button onClick={handleResume} className="btn-primary px-3 py-1 rounded-lg text-xs">Resume</button>
-                  )}
-                  {isCompleted && (
-                    <>
-                      <a href={getReportUrl(sessionId)} target="_blank" className="btn-primary px-3 py-1 rounded-lg text-xs inline-block">
-                        Report PDF
-                      </a>
-                      <button
-                        onClick={() => sessionState.result?.rewritten && navigator.clipboard.writeText(sessionState.result.rewritten)}
-                        className="btn-ghost px-3 py-1 rounded-lg text-xs"
-                      >
-                        Copy text
-                      </button>
-                    </>
-                  )}
-                  {(isCompleted || isFailed) && (
-                    <button onClick={handleNewSession} className="btn-ghost px-3 py-1 rounded-lg text-xs">New</button>
-                  )}
-                </div>
+                {/* Failed actions */}
+                {isFailed && (
+                  <div className="pt-3 border-t border-border-light flex gap-2">
+                    <button onClick={handleResume} className="btn-primary flex-1 py-1.5 rounded-lg text-xs">Resume</button>
+                    <button onClick={handleNewSession} className="btn-ghost flex-1 py-1.5 rounded-lg text-xs">New paper</button>
+                  </div>
+                )}
               </>
             )}
 
