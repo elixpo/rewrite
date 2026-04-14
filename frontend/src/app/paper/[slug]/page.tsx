@@ -460,7 +460,7 @@ export default function PaperPage({ params }: { params: Promise<{ slug: string }
                 {sessionState.paragraphs.length > 0 && (
                   <div className="space-y-1 max-h-[calc(100vh-350px)] overflow-y-auto">
                     {sessionState.paragraphs
-                      .filter((p) => p.original_score > 20 || p.status !== "pending")
+                      .filter((p) => p.status !== "skipped" && (p.original_score > 20 || p.status !== "pending"))
                       .map((p) => (
                       <ParaRow key={p.index} para={p} />
                     ))}

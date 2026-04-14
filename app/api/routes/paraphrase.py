@@ -86,6 +86,7 @@ def _run_paraphrase(session_id: str):
         (i, original_scores[i])
         for i in range(len(paragraphs))
         if original_scores[i]["score"] > threshold
+        and para_progress[i]["status"] != "skipped"
     ]
     total_steps = len(flagged)
 
