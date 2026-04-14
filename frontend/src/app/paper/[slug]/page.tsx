@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, use } from "react";
+import { useState, useEffect, useCallback, useRef, use, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { TexEditor } from "@/components/TexEditor";
 import { DomainSelect } from "@/components/DomainSelect";
@@ -52,6 +52,11 @@ export default function PaperPage({ params }: { params: Promise<{ slug: string }
   const [sessionState, setSessionState] = useState<SessionState | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
 
+  // Diff review state — after rewrite completes, user reviews before accepting
+  const [originalBeforeRewrite, setOriginalBeforeRewrite] = useState<string | null>(null);
+  const [rewrittenText, setRewrittenText] = useState<string | null>(null);
+  const [reviewMode, setReviewMode] = useState(false);
+
   const wordCount = texContent.trim().split(/\s+/).filter(Boolean).length;
 
   // Load paper session from sessionStorage
@@ -86,9 +91,10 @@ export default function PaperPage({ params }: { params: Promise<{ slug: string }
       (data) => {
         setSessionState(data);
         setLoading(false);
-        // Apply rewritten text to the editor
+        // Enter review mode — show diff, don't apply yet
         if (data.result?.rewritten) {
-          setTexContent(data.result.rewritten);
+          setRewrittenText(data.result.rewritten);
+          setReviewMode(true);
         }
       },
       (err) => { setError(err); setLoading(false); },
@@ -170,6 +176,11 @@ export default function PaperPage({ params }: { params: Promise<{ slug: string }
     if (!loggedIn) { setError("Sign in to use the rewriter."); return; }
     if (wordCount > limits.maxWords) { setError(`Text exceeds word limit.`); return; }
 
+    // Save original for diff review
+    setOriginalBeforeRewrite(texContent);
+    setRewrittenText(null);
+    setReviewMode(false);
+
     setLoading(true);
     setError(null);
     setSidebarOpen(true);
@@ -207,9 +218,64 @@ export default function PaperPage({ params }: { params: Promise<{ slug: string }
     router.push("/");
   };
 
+  const handleAcceptRewrite = () => {
+    if (rewrittenText) {
+      setTexContent(rewrittenText);
+      showToast("Changes applied");
+    }
+    setReviewMode(false);
+    setOriginalBeforeRewrite(null);
+    setRewrittenText(null);
+  };
+
+  const handleUndoRewrite = () => {
+    if (originalBeforeRewrite) {
+      setTexContent(originalBeforeRewrite);
+      showToast("Changes reverted");
+    }
+    setReviewMode(false);
+    setOriginalBeforeRewrite(null);
+    setRewrittenText(null);
+    setSessionId(null);
+    setSessionState(null);
+  };
+
   const isRunning = sessionState?.status === "running" || sessionState?.status === "pending";
   const isCompleted = sessionState?.status === "completed";
   const isFailed = sessionState?.status === "failed" || sessionState?.status === "interrupted";
+
+  // Build diff chunks for the editor when in review mode
+  const editorDiffs = useMemo(() => {
+    if (!reviewMode || !rewrittenText || !originalBeforeRewrite) return undefined;
+    // Find which lines changed between original and rewritten
+    const origLines = originalBeforeRewrite.split("\n");
+    const newLines = rewrittenText.split("\n");
+    const chunks: Array<{ paraIndex: number; originalText: string; rewrittenText: string; startLine: number; endLine: number }> = [];
+
+    let i = 0;
+    let chunkIdx = 0;
+    while (i < Math.max(origLines.length, newLines.length)) {
+      const orig = origLines[i] || "";
+      const rewr = newLines[i] || "";
+      if (orig !== rewr) {
+        const start = i;
+        // Find end of changed block
+        while (i < Math.max(origLines.length, newLines.length) && (origLines[i] || "") !== (newLines[i] || "")) {
+          i++;
+        }
+        chunks.push({
+          paraIndex: chunkIdx++,
+          originalText: origLines.slice(start, i).join("\n"),
+          rewrittenText: newLines.slice(start, i).join("\n"),
+          startLine: start,
+          endLine: i - 1,
+        });
+      } else {
+        i++;
+      }
+    }
+    return chunks;
+  }, [reviewMode, rewrittenText, originalBeforeRewrite]);
 
   if (!mounted) {
     return (
@@ -248,15 +314,15 @@ export default function PaperPage({ params }: { params: Promise<{ slug: string }
 
             <button
               onClick={handleRewrite}
-              disabled={loading || isRunning || wordCount < 10 || !loggedIn}
+              disabled={loading || isRunning || reviewMode || wordCount < 10 || !loggedIn}
               className="btn-primary px-3 py-1 rounded-lg text-xs"
               title={!loggedIn ? "Sign in to rewrite" : undefined}
             >
-              {loading && sessionId ? "Starting..." : "Rewrite"}
+              {loading && sessionId ? "Rewriting..." : "Rewrite"}
             </button>
             <button
               onClick={handleCheck}
-              disabled={loading || isRunning || wordCount < 10}
+              disabled={loading || isRunning || reviewMode || wordCount < 10}
               className="btn-ghost px-3 py-1 rounded-lg text-xs font-semibold"
             >
               {loading && !sessionId ? "Checking..." : "Check AI %"}
@@ -273,13 +339,35 @@ export default function PaperPage({ params }: { params: Promise<{ slug: string }
           </div>
         </div>
 
+        {/* Review bar — shown after rewrite completes, before user accepts */}
+        {reviewMode && (
+          <div className="flex items-center justify-between px-4 py-2 border-b border-lime-border bg-lime-dim">
+            <div className="flex items-center gap-2">
+              <span className="text-lime text-xs font-semibold">Review changes</span>
+              <span className="text-text-muted text-[10px]">
+                {editorDiffs?.length || 0} section{(editorDiffs?.length || 0) !== 1 ? "s" : ""} modified
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={handleAcceptRewrite} className="px-3 py-1 rounded-lg text-xs font-semibold bg-success text-[#0c0f0a] hover:brightness-110 transition-all">
+                Keep changes
+              </button>
+              <button onClick={handleUndoRewrite} className="px-3 py-1 rounded-lg text-xs font-semibold bg-[rgba(239,68,68,0.15)] text-error border border-[rgba(239,68,68,0.3)] hover:bg-[rgba(239,68,68,0.25)] transition-all">
+                Undo
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Editor — fills remaining space */}
         <div className="flex-1 overflow-auto">
           <TexEditor
-            value={texContent}
+            value={reviewMode && rewrittenText ? rewrittenText : texContent}
             onChange={setTexContent}
-            readOnly={isRunning}
-            paragraphScores={paragraphScores}
+            readOnly={isRunning || reviewMode}
+            paragraphScores={reviewMode ? undefined : paragraphScores}
+            diffs={editorDiffs}
+            lockMessage={isRunning ? `Rewriting${sessionState?.paragraphs ? ` — ${sessionState.paragraphs.filter(p => p.status === "done").length}/${sessionState.paragraphs.filter(p => p.status !== "skipped").length} paragraphs` : "..."}` : undefined}
           />
         </div>
       </div>
